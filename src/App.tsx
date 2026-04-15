@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Route, Routes, NavLink, Navigate } from 'react-router-dom';
+import { Route, Routes, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import VotePage from './pages/VotePage';
 import ResultsPage from './pages/ResultsPage';
@@ -12,6 +12,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   }`;
 
 function App() {
+  const navigate = useNavigate();
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(
     () => localStorage.getItem('adminAuthenticated') === 'true'
   );
@@ -33,13 +34,28 @@ function App() {
     setTheme((current) => (current === 'light' ? 'dark' : 'light'));
   };
 
+  const accessAdmin = () => {
+    if (isAdminAuthenticated) {
+      navigate('/admin');
+    } else {
+      navigate('/admin');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div>
             <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">FACULTY OF AGRICULTURAL SCIENCE</p>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Anonymous daily voting system</p>
+            <button
+              type="button"
+              onClick={accessAdmin}
+              className="bg-transparent p-0 text-sm text-slate-500 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-300 transition cursor-pointer"
+              title="Hidden admin access"
+            >
+              Anonymous daily voting system
+            </button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <nav className="flex flex-wrap items-center gap-2">

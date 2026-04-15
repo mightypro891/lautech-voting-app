@@ -148,11 +148,15 @@ export default function AdminPage() {
 
   const handleSettingsSave = async () => {
     setSaving(true);
+    setStatus(null);
     try {
       await saveSystemSettings(settings);
-      setStatus('System settings updated.');
+      setStatus('✅ System settings updated successfully!');
+      setTimeout(() => setStatus(null), 3000);
     } catch (error) {
-      setStatus((error as Error).message || 'Unable to update settings.');
+      const errorMsg = (error as Error).message || 'Unable to update settings.';
+      setStatus(`❌ Error: ${errorMsg}`);
+      console.error('Settings save error:', error);
     } finally {
       setSaving(false);
     }
