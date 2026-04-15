@@ -269,14 +269,16 @@ export default function VotePage() {
         </div>
       )}
 
-      <CandidateProfileModal
-        candidate={selectedCandidate ?? ({} as Candidate)}
-        isOpen={Boolean(selectedCandidate)}
-        isVoting={submitting}
-        canVote={canVote}
-        onClose={closeCandidate}
-        onVote={handleVote}
-      />
+      {selectedCandidate ? (
+        <CandidateProfileModal
+          candidate={selectedCandidate}
+          isOpen={true}
+          isVoting={submitting}
+          canVote={canVote}
+          onClose={closeCandidate}
+          onVote={handleVote}
+        />
+      ) : null}
     </div>
   );
 }

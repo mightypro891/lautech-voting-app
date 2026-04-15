@@ -34,12 +34,12 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white/90 backdrop-blur sticky top-0 z-20">
+    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div>
-            <p className="text-xl font-semibold text-slate-900">LAUTECH AGRIC CLASS 29</p>
-            <p className="text-sm text-slate-500">Anonymous daily voting system</p>
+            <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">FACULTY OF AGRICULTURAL SCIENCE</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Anonymous daily voting system</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <nav className="flex flex-wrap items-center gap-2">
