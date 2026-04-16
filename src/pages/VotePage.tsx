@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import CandidateCard from '../components/CandidateCard';
 import CandidateProfileModal from '../components/CandidateProfileModal';
 import LoadingSpinner from '../components/LoadingSpinner';
+import SearchAndFilter from '../components/SearchAndFilter';
 import { Candidate, SystemSettings, VoterRecord } from '../types';
+import { useFavorites } from '../hooks/useFavorites';
 import {
   fetchRecentVoteCounts,
   fetchSystemSettings,
@@ -51,7 +53,10 @@ function formatCountdown(ms: number) {
 }
 
 export default function VotePage() {
+  const { favorites, toggleFavorite, isFavorite } = useFavorites();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [filteredCandidates, setFilteredCandidates] = useState<Candidate[]>([]);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [settings, setSettings] = useState<SystemSettings>({ votingOpen: true, resultsVisible: false, cooldownHours: 24 });
   const [voter, setVoter] = useState<VoterRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -210,28 +215,81 @@ export default function VotePage() {
       ) : candidates.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-slate-300 bg-white/80 p-12 text-center text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">No candidates yet.</div>
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[0.7fr_0.3fr]">
-          <div className="space-y-6">
-            {Object.entries(grouped).map(([position, items]) => (
-              <div key={position} className="space-y-4">
-                <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{position}</h2>
-                <div className="grid gap-4 sm:grid-cols-1">
-                  {items
-                    .sort((a, b) => b.votes - a.votes)
-                    .map((candidate) => (
-                      <CandidateCard
-                        key={candidate.id}
-                        candidate={candidate}
-                        highlight={highlightId === candidate.id}
-                        actionLabel={canVote ? 'Vote' : 'Locked'}
-                        onAction={canVote ? handleVote : undefined}
-                        onView={openCandidate}
-                      />
-                    ))}
-                </div>
-              </div>
-            ))}
+        <>
+          <SearchAndFilter candidates={candidates} onFilter={setFilteredCandidates} />
+
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Browse candidates</h2>
+            <button
+              type="button"
+              onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+              className={`rounded-3xl px-4 py-2 text-sm font-semibold transition ${
+                showFavoritesOnly
+                  ? 'bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-700'
+                  : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              ⭐ {showFavoritesOnly ? `My Favorites (${favorites.length})` : 'Show Favorites'}
+            </button>
           </div>
+
+          <div className="grid gap-6 xl:grid-cols-[0.7fr_0.3fr]">
+            <div className="space-y-6">
+              {Object.entries(grouped).map(([position, items]) => {
+                const displayItems = showFavoritesOnly
+                  ? items.filter((c) => isFavorite(c.id))
+                  : filteredCandidates.length > 0
+                    ? items.filter((c) => filteredCandidates.includes(c))
+                    : items;
+
+                if (displayItems.length === 0) return null;
+
+                return (
+                  <div key={position} className="space-y-4">
+                    <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{position}</h2>
+                    <div className="grid gap-4 sm:grid-cols-1">
+                      {displayItems
+                        .sort((a, b) => b.votes - a.votes)
+                        .map((candidate) => (
+                          <div key={candidate.id} className="relative">
+                            {isFavorite(candidate.id) && (
+                              <button
+                                type="button"
+                                onClick={() => toggleFavorite(candidate.id)}
+                                className="absolute right-3 top-3 z-10 rounded-full bg-amber-500 px-2 py-1 text-xs font-bold text-white shadow-lg hover:bg-amber-600"
+                              >
+                                ⭐ Favorited
+                              </button>
+                            )}
+                            <div onClick={() => toggleFavorite(candidate.id)} className="group relative">
+                              <CandidateCard
+                                key={candidate.id}
+                                candidate={candidate}
+                                highlight={highlightId === candidate.id}
+                                actionLabel={canVote ? 'Vote' : 'Locked'}
+                                onAction={canVote ? handleVote : undefined}
+                                onView={openCandidate}
+                              />
+                              {!isFavorite(candidate.id) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleFavorite(candidate.id);
+                                  }}
+                                  className="absolute right-3 top-3 rounded-full bg-slate-900/70 px-2 py-1 text-xs font-bold text-white opacity-0 transition group-hover:opacity-100"
+                                >
+                                  ⭐ Add
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
 
           <aside className="space-y-6 rounded-4xl border border-slate-200 bg-white p-6 shadow-soft dark:border-slate-700 dark:bg-slate-950">
             <div className="space-y-3">
@@ -267,6 +325,7 @@ export default function VotePage() {
             </div>
           </aside>
         </div>
+      </>
       )}
 
       {selectedCandidate ? (

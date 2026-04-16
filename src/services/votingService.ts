@@ -23,6 +23,7 @@ const SYSTEM_SETTINGS_DOC = doc(db, 'settings', 'system');
 const CANDIDATES_COLLECTION = collection(db, 'candidates');
 const VOTERS_COLLECTION = collection(db, 'voters');
 const VOTES_COLLECTION = collection(db, 'votes');
+const ACTIVITIES_COLLECTION = collection(db, 'activities');
 
 function simpleHash(value: string) {
   let hash = 0;
@@ -36,6 +37,74 @@ function simpleHash(value: string) {
 function getDeviceFingerprint() {
   const fingerprint = [navigator.userAgent, screen.width, screen.height, Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
   return simpleHash(fingerprint);
+}
+
+async function logActivity(type: 'vote' | 'candidate_added' | 'candidate_deleted' | 'settings_changed', details: string, candidateId?: string, candidateName?: string) {
+  await addDoc(ACTIVITIES_COLLECTION, {
+    type,
+    details,
+    candidateId,
+    candidateName,
+    timestamp: serverTimestamp(),
+  });
+}
+
+// Bot detection algorithms
+async function detectBotActivity(voterId: string, candidateId: string): Promise<{ isBot: boolean; reason?: string }> {
+  const now = Date.now();
+  const oneHourAgo = now - (60 * 60 * 1000);
+  const oneDayAgo = now - (24 * 60 * 60 * 1000);
+
+  try {
+    // Check recent votes from this voter
+    const recentVotesQuery = query(
+      VOTES_COLLECTION,
+      where('voterId', '==', voterId),
+      where('timestamp', '>=', oneHourAgo)
+    );
+    const recentVotes = await getDocs(recentVotesQuery);
+
+    // Check total votes in last 24 hours
+    const dailyVotesQuery = query(
+      VOTES_COLLECTION,
+      where('timestamp', '>=', oneDayAgo)
+    );
+    const dailyVotes = await getDocs(dailyVotesQuery);
+
+    // Bot detection rules
+    if (recentVotes.size > 10) {
+      return { isBot: true, reason: 'Too many votes in one hour' };
+    }
+
+    if (dailyVotes.size > 50) {
+      return { isBot: true, reason: 'Excessive daily voting activity' };
+    }
+
+    // Check for rapid clicking (votes within 1 second)
+    const voteTimes = recentVotes.docs.map(doc => doc.data().timestamp).sort();
+    for (let i = 1; i < voteTimes.length; i++) {
+      if (voteTimes[i] - voteTimes[i - 1] < 1000) {
+        return { isBot: true, reason: 'Rapid voting detected' };
+      }
+    }
+
+    // Check voter record for suspicious patterns
+    const voterRef = doc(VOTERS_COLLECTION, voterId);
+    const voterSnap = await getDoc(voterRef);
+    if (voterSnap.exists()) {
+      const voter = voterSnap.data() as VoterRecord;
+      const timeSinceLastVote = now - voter.lastVoteTime;
+
+      if (timeSinceLastVote < 1000) {
+        return { isBot: true, reason: 'Voting too quickly' };
+      }
+    }
+
+    return { isBot: false };
+  } catch (error) {
+    console.error('Bot detection error:', error);
+    return { isBot: false }; // Fail open to not block legitimate users
+  }
 }
 
 export function getVoterId() {
@@ -130,6 +199,14 @@ export async function voteForCandidate(candidateId: string) {
   }
   localStorage.setItem(lastActionKey, now.toString());
 
+  // Bot detection check
+  const botCheck = await detectBotActivity(voterId, candidateId);
+  if (botCheck.isBot) {
+    // Log suspicious activity
+    await logActivity('vote', `Suspicious voting activity detected: ${botCheck.reason}`, candidateId);
+    throw new Error('Suspicious activity detected. Please try again later.');
+  }
+
   return runTransaction(db, async (tx) => {
     const settingsSnap = await tx.get(SYSTEM_SETTINGS_DOC);
     const settings = settingsSnap.exists()
@@ -155,6 +232,7 @@ export async function voteForCandidate(candidateId: string) {
     if (!candidateSnap.exists()) {
       throw new Error('Candidate not found.');
     }
+    const candidate = candidateSnap.data() as Candidate;
 
     tx.update(candidateRef, { votes: increment(1) });
     tx.set(voterRef, { lastVoteTime: now, lastVotedCandidateId: candidateId }, { merge: true });
@@ -164,6 +242,9 @@ export async function voteForCandidate(candidateId: string) {
       candidateId,
       timestamp: now,
     });
+
+    // Log activity
+    await logActivity('vote', `Vote cast for ${candidate.name}`, candidateId, candidate.name);
 
     return { cooldownExpiresAt: now + settings.cooldownHours * 60 * 60 * 1000 };
   });
@@ -191,6 +272,7 @@ export async function createCandidate(data: {
     votes: 0,
     createdAt: serverTimestamp(),
   });
+  await logActivity('candidate_added', `New candidate added: ${data.name}`, docRef.id, data.name);
   return docRef.id;
 }
 
@@ -203,14 +285,16 @@ export async function deleteCandidate(candidateId: string) {
   const candidateRef = doc(CANDIDATES_COLLECTION, candidateId);
   const snap = await getDoc(candidateRef);
   if (snap.exists()) {
-    const data = snap.data() as { imagePath?: string };
+    const data = snap.data() as { imagePath?: string; name: string };
     if (data.imagePath) {
       await deleteObject(ref(storage, data.imagePath));
     }
+    await logActivity('candidate_deleted', `Candidate removed: ${data.name}`, candidateId, data.name);
   }
   await deleteDoc(candidateRef);
 }
 
 export async function saveSystemSettings(settings: SystemSettings) {
   await setDoc(SYSTEM_SETTINGS_DOC, settings, { merge: true });
+  await logActivity('settings_changed', `System settings updated: voting ${settings.votingOpen ? 'opened' : 'closed'}, results ${settings.resultsVisible ? 'visible' : 'hidden'}`);
 }

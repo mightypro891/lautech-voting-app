@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ImageUploadDropzone from '../components/ImageUploadDropzone';
 import LoadingSpinner from '../components/LoadingSpinner';
+import AnalyticsCharts from '../components/AnalyticsCharts';
+import ActivityFeed from '../components/ActivityFeed';
+import AdminControls from '../components/AdminControls';
+import BulkImport from '../components/BulkImport';
 import { Candidate, SystemSettings } from '../types';
 import {
   createCandidate,
@@ -141,6 +145,24 @@ export default function AdminPage() {
       if (selectedCandidate?.id === candidateId) resetForm();
     } catch (error) {
       setStatus((error as Error).message || 'Unable to delete candidate.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddTestCandidate = async () => {
+    setSaving(true);
+    try {
+      await createCandidate({
+        name: 'AI Assistant',
+        position: 'Technical Advisor',
+        manifesto: 'As an AI-powered candidate, I promise to bring cutting-edge technology solutions, automated efficiency, and data-driven decision making to improve our systems. My algorithms will optimize processes, predict future trends, and ensure fair representation for all stakeholders.',
+        imageUrl: 'https://via.placeholder.com/300x300/6366f1/ffffff?text=AI',
+        imagePath: 'test-ai-image.jpg'
+      });
+      setStatus('✅ AI test candidate added successfully!');
+    } catch (error) {
+      setStatus((error as Error).message || 'Unable to add test candidate.');
     } finally {
       setSaving(false);
     }
@@ -291,6 +313,14 @@ export default function AdminPage() {
               </button>
               <button
                 type="button"
+                onClick={handleAddTestCandidate}
+                disabled={saving}
+                className="rounded-3xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              >
+                Add AI Test Candidate
+              </button>
+              <button
+                type="button"
                 onClick={resetForm}
                 disabled={saving}
                 className="rounded-3xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-400"
@@ -412,6 +442,12 @@ export default function AdminPage() {
               </div>
             </div>
           </div>
+
+          {candidates.length > 0 && <AnalyticsCharts candidates={candidates} totalVotes={totalVotes} />}
+          <ActivityFeed />
+          <BulkImport onImport={() => setStatus('✅ Candidates imported successfully!')} />
+          <AdminControls candidates={candidates} onRefresh={() => window.location.reload()} />
+
           <section className="rounded-4xl border border-slate-200 bg-white p-8 shadow-soft">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
