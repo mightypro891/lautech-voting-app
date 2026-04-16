@@ -5,6 +5,7 @@ import AnalyticsCharts from '../components/AnalyticsCharts';
 import ActivityFeed from '../components/ActivityFeed';
 import AdminControls from '../components/AdminControls';
 import BulkImport from '../components/BulkImport';
+import AuditLogs from '../components/AuditLogs';
 import { Candidate, SystemSettings } from '../types';
 import {
   createCandidate,
@@ -447,6 +448,7 @@ export default function AdminPage() {
           <ActivityFeed />
           <BulkImport onImport={() => setStatus('✅ Candidates imported successfully!')} />
           <AdminControls candidates={candidates} onRefresh={() => window.location.reload()} />
+          <AuditLogs />
 
           <section className="rounded-4xl border border-slate-200 bg-white p-8 shadow-soft">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

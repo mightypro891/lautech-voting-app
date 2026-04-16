@@ -11,7 +11,6 @@ export interface Candidate {
 
 export interface VoterRecord {
   lastVoteTime: number;
-  lastVotedCandidateId: string;
 }
 
 export interface SystemSettings {

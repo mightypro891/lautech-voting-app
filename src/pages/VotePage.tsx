@@ -12,6 +12,7 @@ import {
   getVoterId,
   subscribeCandidates,
   voteForCandidate,
+  voteForMultipleCandidates,
 } from '../services/votingService';
 
 function groupByPosition(candidates: Candidate[]) {
@@ -62,12 +63,13 @@ export default function VotePage() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
-  const [recentVoteCounts, setRecentVoteCounts] = useState<Record<string, number>>({});
+  const [selectedCandidates, setSelectedCandidates] = useState<Record<string, string>>({}); // position -> candidateId
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
   const [streak, setStreak] = useState<VoteStreakData>(loadVoteStreak());
-  const [countdown, setCountdown] = useState('');
-  const [showVoteConfirm, setShowVoteConfirm] = useState(false);
-  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState('Ready to vote');
+  const [recentVoteCounts, setRecentVoteCounts] = useState<Record<string, number>>({});
+  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [pendingVoteCandidate, setPendingVoteCandidate] = useState<Candidate | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribeCandidates((items) => {
@@ -94,6 +96,17 @@ export default function VotePage() {
     return () => clearInterval(interval);
   }, [settings, voter]);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && pendingVoteCandidate) {
+        cancelVote();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [pendingVoteCandidate]);
+
   const grouped = useMemo(() => groupByPosition(candidates), [candidates]);
 
   const canVote = useMemo(() => {
@@ -102,6 +115,10 @@ export default function VotePage() {
     const cooldownMs = settings.cooldownHours * 60 * 60 * 1000;
     return Date.now() - voter.lastVoteTime >= cooldownMs;
   }, [settings, voter]);
+
+  const hasVoted = useMemo(() => {
+    return voter && voter.lastVoteTime > 0;
+  }, [voter]);
 
   const nextVoteTime = useMemo(() => {
     if (!voter) return null;
@@ -126,6 +143,70 @@ export default function VotePage() {
     return '';
   };
 
+  const selectCandidateForPosition = (position: string, candidateId: string) => {
+    setSelectedCandidates(prev => ({
+      ...prev,
+      [position]: candidateId
+    }));
+  };
+
+  const getSelectedCandidateForPosition = (position: string) => {
+    const candidateId = selectedCandidates[position];
+    return candidateId ? candidates.find(c => c.id === candidateId) : null;
+  };
+
+  const getTotalSelectedPositions = () => Object.keys(selectedCandidates).length;
+  const getTotalPositions = () => Object.keys(grouped).length;
+
+  async function handleBulkVote() {
+    const selectedCount = getTotalSelectedPositions();
+    if (selectedCount === 0) {
+      setStatus('Please select at least one candidate to vote for.');
+      return;
+    }
+
+    setStatus(null);
+    setSubmitting(true);
+    try {
+      await voteForMultipleCandidates(selectedCandidates);
+      const updatedVoter = await fetchVoterRecord(getVoterId());
+      setVoter(updatedVoter);
+      setShowBulkConfirm(true);
+      setTimeout(() => setShowBulkConfirm(false), 3000);
+
+      const now = Date.now();
+      const lastVote = streak.lastVoteTime;
+      const isWithin48Hours = now - lastVote <= 48 * 60 * 60 * 1000;
+      const isAfter24Hours = now - lastVote >= 24 * 60 * 60 * 1000;
+      const newStreak = isAfter24Hours && isWithin48Hours ? streak.currentStreak + 1 : 1;
+      const streakData = { currentStreak: newStreak, lastVoteTime: now };
+      saveVoteStreak(streakData);
+      setStreak(streakData);
+
+      setStatus(`✅ Your votes for ${selectedCount} position${selectedCount > 1 ? 's' : ''} have been recorded!`);
+      if (navigator.vibrate) navigator.vibrate(120);
+
+      // Clear selections after successful vote
+      setSelectedCandidates({});
+    } catch (error) {
+      setStatus((error as Error).message || 'Unable to cast votes.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const openCandidate = (candidate: Candidate) => {
+    setSelectedCandidate(candidate);
+  };
+
+  const closeCandidate = () => {
+    setSelectedCandidate(null);
+  };
+
+  const cancelVote = () => {
+    setPendingVoteCandidate(null);
+  };
+
   async function handleVote(candidateId: string) {
     setStatus(null);
     setSubmitting(true);
@@ -133,10 +214,7 @@ export default function VotePage() {
       await voteForCandidate(candidateId);
       const updatedVoter = await fetchVoterRecord(getVoterId());
       setVoter(updatedVoter);
-      setShowVoteConfirm(true);
-      setHighlightId(candidateId);
-      setTimeout(() => setShowVoteConfirm(false), 2600);
-      setTimeout(() => setHighlightId(null), 1200);
+      setSelectedCandidate(null);
 
       const now = Date.now();
       const lastVote = streak.lastVoteTime;
@@ -156,24 +234,27 @@ export default function VotePage() {
     }
   }
 
-  const openCandidate = (candidate: Candidate) => {
-    setSelectedCandidate(candidate);
-  };
-
-  const closeCandidate = () => {
-    setSelectedCandidate(null);
-  };
-
   return (
     <div className="space-y-8">
       <section className="rounded-4xl border border-slate-200 bg-white p-8 shadow-soft transition duration-500 dark:bg-slate-900 dark:border-slate-700">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Vote page</p>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-900 dark:text-slate-100">Choose your favorite candidate</h1>
+            <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Award Night Voting</p>
+            <h1 className="mt-3 text-3xl font-semibold text-slate-900 dark:text-slate-100">
+              {hasVoted ? 'Vote again for all positions' : 'Vote for all positions'}
+            </h1>
+            {hasVoted && voter && (
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                You last voted {Math.floor((Date.now() - voter.lastVoteTime) / (1000 * 60 * 60))} hours ago. 
+                {canVote ? 'You can vote again now.' : `Next vote in ${countdown}.`}
+              </p>
+            )}
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+              Selected: {getTotalSelectedPositions()} / {getTotalPositions()} positions
+            </p>
           </div>
           <div className="rounded-3xl bg-slate-100 px-4 py-3 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-            Voting is {settings.votingOpen ? 'Open' : 'Closed'} • Cooldown {settings.cooldownHours} hours
+            Voting is {settings.votingOpen ? 'Open' : 'Closed'} • Vote cooldown: {settings.cooldownHours} hours
           </div>
         </div>
 
@@ -181,7 +262,7 @@ export default function VotePage() {
           <div className="rounded-3xl border border-slate-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Next vote</p>
             <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-              {canVote ? 'Vote now' : countdown}
+              {canVote ? 'Can vote now' : countdown}
             </p>
           </div>
           <div className="rounded-3xl border border-slate-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -198,13 +279,17 @@ export default function VotePage() {
         ) : null}
       </section>
 
-      {showVoteConfirm ? (
+      {showBulkConfirm ? (
         <section className="rounded-4xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-900 shadow-soft dark:bg-emerald-950/40 dark:border-emerald-600 dark:text-emerald-200">
           <div className="flex items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-700 text-white">✓</div>
             <div>
-              <p className="text-lg font-semibold">Your vote has been recorded</p>
-              <p className="text-sm text-slate-700 dark:text-slate-300">Come back when the countdown ends to vote again.</p>
+              <p className="text-lg font-semibold">
+                All votes recorded successfully!
+              </p>
+              <p className="text-sm text-slate-700 dark:text-slate-300">
+                Come back after 24 hours to vote again.
+              </p>
             </div>
           </div>
         </section>
@@ -233,24 +318,35 @@ export default function VotePage() {
             </button>
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[0.7fr_0.3fr]">
-            <div className="space-y-6">
-              {Object.entries(grouped).map(([position, items]) => {
-                const displayItems = showFavoritesOnly
-                  ? items.filter((c) => isFavorite(c.id))
-                  : filteredCandidates.length > 0
-                    ? items.filter((c) => filteredCandidates.includes(c))
-                    : items;
+          <div className="space-y-8">
+            {Object.entries(grouped).map(([position, items]) => {
+              const displayItems = showFavoritesOnly
+                ? items.filter((c) => isFavorite(c.id))
+                : filteredCandidates.length > 0
+                  ? items.filter((c) => filteredCandidates.includes(c))
+                  : items;
 
-                if (displayItems.length === 0) return null;
+              if (displayItems.length === 0) return null;
 
-                return (
-                  <div key={position} className="space-y-4">
+              const selectedCandidate = getSelectedCandidateForPosition(position);
+
+              return (
+                <div key={position} className="space-y-4">
+                  <div className="flex items-center justify-between">
                     <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{position}</h2>
-                    <div className="grid gap-4 sm:grid-cols-1">
-                      {displayItems
-                        .sort((a, b) => b.votes - a.votes)
-                        .map((candidate) => (
+                    {selectedCandidate && (
+                      <div className="flex items-center gap-2 rounded-3xl bg-emerald-100 px-3 py-1 text-sm text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">
+                        <span>✓</span>
+                        <span>{selectedCandidate.name}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {displayItems
+                      .sort((a, b) => b.votes - a.votes)
+                      .map((candidate) => {
+                        const isSelected = selectedCandidates[position] === candidate.id;
+                        return (
                           <div key={candidate.id} className="relative">
                             {isFavorite(candidate.id) && (
                               <button
@@ -258,18 +354,39 @@ export default function VotePage() {
                                 onClick={() => toggleFavorite(candidate.id)}
                                 className="absolute right-3 top-3 z-10 rounded-full bg-amber-500 px-2 py-1 text-xs font-bold text-white shadow-lg hover:bg-amber-600"
                               >
-                                ⭐ Favorited
+                                ⭐
                               </button>
                             )}
-                            <div onClick={() => toggleFavorite(candidate.id)} className="group relative">
-                              <CandidateCard
-                                key={candidate.id}
-                                candidate={candidate}
-                                highlight={highlightId === candidate.id}
-                                actionLabel={canVote ? 'Vote' : 'Locked'}
-                                onAction={canVote ? handleVote : undefined}
-                                onView={openCandidate}
-                              />
+                            <div className="group relative">
+                              <div
+                                className={`cursor-pointer transition-all duration-200 ${
+                                  isSelected
+                                    ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-slate-900'
+                                    : 'hover:ring-1 hover:ring-slate-300 dark:hover:ring-slate-600'
+                                }`}
+                                onClick={() => canVote && selectCandidateForPosition(position, candidate.id)}
+                              >
+                                <CandidateCard
+                                  candidate={candidate}
+                                  highlight={false}
+                                  actionLabel=""
+                                  onAction={() => {}}
+                                  onView={openCandidate}
+                                />
+                              </div>
+                              {canVote && (
+                                <button
+                                  type="button"
+                                  onClick={() => selectCandidateForPosition(position, candidate.id)}
+                                  className={`absolute bottom-3 right-3 rounded-full px-3 py-1 text-xs font-bold transition ${
+                                    isSelected
+                                      ? 'bg-blue-600 text-white'
+                                      : 'bg-slate-900/70 text-white hover:bg-slate-800'
+                                  }`}
+                                >
+                                  {isSelected ? 'Selected' : 'Select'}
+                                </button>
+                              )}
                               {!isFavorite(candidate.id) && (
                                 <button
                                   type="button"
@@ -279,65 +396,76 @@ export default function VotePage() {
                                   }}
                                   className="absolute right-3 top-3 rounded-full bg-slate-900/70 px-2 py-1 text-xs font-bold text-white opacity-0 transition group-hover:opacity-100"
                                 >
-                                  ⭐ Add
+                                  ⭐
                                 </button>
                               )}
                             </div>
                           </div>
-                        ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-          <aside className="space-y-6 rounded-4xl border border-slate-200 bg-white p-6 shadow-soft dark:border-slate-700 dark:bg-slate-950">
-            <div className="space-y-3">
-              <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Live leaderboard</p>
-              <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Top candidates</h2>
-            </div>
-            <div className="space-y-3">
-              {sortedCandidates.slice(0, 3).map((candidate, index) => (
-                <div key={candidate.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm uppercase tracking-[0.24em] text-slate-500">#{index + 1}</p>
-                      <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{candidate.name}</p>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">{trendBadge(candidate)}</p>
-                    </div>
-                    <div className="rounded-3xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">{candidate.votes}</div>
+                        );
+                      })}
                   </div>
                 </div>
-              ))}
-            </div>
-            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-              <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Trending</p>
-              <div className="mt-4 space-y-2 text-sm text-slate-700 dark:text-slate-300">
-                {sortedCandidates.slice(0, 5).map((candidate) => (
-                  <div key={candidate.id} className="flex items-center justify-between gap-2">
-                    <span>{candidate.name}</span>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                      {trendBadge(candidate) || 'Stable'}
-                    </span>
-                  </div>
-                ))}
+              );
+            })}
+          </div>
+
+          {/* Bulk Confirm Button - Fixed position at bottom */}
+          <div className="sticky bottom-0 -mx-8 -mb-8 mt-8 rounded-b-4xl border-t border-slate-200 bg-white p-8 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Selected: {getTotalSelectedPositions()} / {getTotalPositions()} positions
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-500">
+                  All votes will be saved together • 24-hour cooldown after voting
+                </p>
               </div>
+              <button
+                type="button"
+                onClick={handleBulkVote}
+                disabled={submitting || !canVote || getTotalSelectedPositions() === 0}
+                className="rounded-3xl bg-blue-600 px-8 py-4 text-lg font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400 dark:disabled:bg-slate-600"
+              >
+                {submitting ? 'Saving Votes...' : `Confirm All Votes (${getTotalSelectedPositions()})`}
+              </button>
             </div>
-          </aside>
-        </div>
-      </>
+          </div>
+        </>
       )}
 
-      {selectedCandidate ? (
-        <CandidateProfileModal
-          candidate={selectedCandidate}
-          isOpen={true}
-          isVoting={submitting}
-          canVote={canVote}
-          onClose={closeCandidate}
-          onVote={handleVote}
-        />
-      ) : null}
+      <aside className="space-y-6 rounded-4xl border border-slate-200 bg-white p-6 shadow-soft dark:border-slate-700 dark:bg-slate-950">
+        <div className="space-y-3">
+          <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Live leaderboard</p>
+          <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Top candidates</h2>
+        </div>
+        <div className="space-y-3">
+          {sortedCandidates.slice(0, 3).map((candidate, index) => (
+            <div key={candidate.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm uppercase tracking-[0.24em] text-slate-500">#{index + 1}</p>
+                  <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{candidate.name}</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{trendBadge(candidate)}</p>
+                </div>
+                <div className="rounded-3xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">{candidate.votes}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+          <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Trending</p>
+          <div className="mt-4 space-y-2 text-sm text-slate-700 dark:text-slate-300">
+            {sortedCandidates.slice(0, 5).map((candidate) => (
+              <div key={candidate.id} className="flex items-center justify-between gap-2">
+                <span>{candidate.name}</span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  {trendBadge(candidate) || 'Stable'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }

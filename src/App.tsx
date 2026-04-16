@@ -19,6 +19,8 @@ function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(
     () => (localStorage.getItem('theme') as 'light' | 'dark') || 'light'
   );
+  const [adminPressStart, setAdminPressStart] = useState<number | null>(null);
+  const [adminPressProgress, setAdminPressProgress] = useState(0);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -34,12 +36,48 @@ function App() {
     setTheme((current) => (current === 'light' ? 'dark' : 'light'));
   };
 
+  const handleAdminMouseDown = () => {
+    setAdminPressStart(Date.now());
+    setAdminPressProgress(0);
+
+    const interval = setInterval(() => {
+      if (adminPressStart) {
+        const elapsed = Date.now() - adminPressStart;
+        const progress = Math.min((elapsed / 5000) * 100, 100);
+        setAdminPressProgress(progress);
+
+        if (elapsed >= 5000) {
+          clearInterval(interval);
+          accessAdmin();
+        }
+      }
+    }, 50);
+
+    // Clear interval if mouse/finger is released early
+    const clearProgress = () => {
+      clearInterval(interval);
+      setAdminPressStart(null);
+      setAdminPressProgress(0);
+    };
+
+    document.addEventListener('mouseup', clearProgress, { once: true });
+    document.addEventListener('mouseleave', clearProgress, { once: true });
+    document.addEventListener('touchend', clearProgress, { once: true });
+  };
+
+  const handleAdminTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault(); // Prevent scrolling on mobile
+    handleAdminMouseDown();
+  };
+
   const accessAdmin = () => {
     if (isAdminAuthenticated) {
       navigate('/admin');
     } else {
       navigate('/admin');
     }
+    setAdminPressStart(null);
+    setAdminPressProgress(0);
   };
 
   return (
@@ -50,11 +88,18 @@ function App() {
             <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">FACULTY OF AGRICULTURAL SCIENCE</p>
             <button
               type="button"
-              onClick={accessAdmin}
-              className="bg-transparent p-0 text-sm text-slate-500 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-300 transition cursor-pointer"
-              title="Hidden admin access"
+              onMouseDown={handleAdminMouseDown}
+              onTouchStart={handleAdminTouchStart}
+              className="relative bg-transparent p-0 text-sm text-slate-500 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-300 transition cursor-pointer overflow-hidden select-none"
+              title="Long press for 5 seconds to access admin panel"
             >
-              Anonymous daily voting system
+              <span className="relative z-10">Anonymous daily voting system</span>
+              {adminPressProgress > 0 && (
+                <div
+                  className="absolute bottom-0 left-0 h-0.5 bg-blue-500 transition-all duration-50"
+                  style={{ width: `${adminPressProgress}%` }}
+                />
+              )}
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
